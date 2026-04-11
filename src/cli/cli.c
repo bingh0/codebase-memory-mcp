@@ -1458,13 +1458,15 @@ int cbm_remove_antigravity_mcp(const char *config_path) {
 
 /* ── Claude Code pre-tool hooks ───────────────────────────────── */
 
-#define CMM_HOOK_MATCHER "Grep|Glob|Read|Search"
+#define CMM_HOOK_MATCHER "Grep|Search"
 #define CMM_HOOK_COMMAND "~/.claude/hooks/cbm-code-discovery-gate"
 
 /* Old matcher values from previous versions — recognized during upgrade so
  * upsert_hooks_json can remove them before inserting the current matcher. */
 static const char *cmm_old_matchers[] = {
+    "Grep|Glob|Read|Search",
     "Grep|Glob|Read",
+    "Grep|Glob|Search",
     NULL,
 };
 
@@ -1635,9 +1637,10 @@ int cbm_remove_claude_hooks(const char *settings_path) {
 }
 
 /* Install the code discovery gate script to ~/.claude/hooks/.
- * Blocks the first Grep/Glob/Read/Search call per session (exit 2 + stderr),
+ * Blocks the first in-project Grep/Search call per session (exit 2 + stderr),
  * nudging Claude toward codebase-memory-mcp. All subsequent calls in the same
- * session pass through (gate file keyed on PPID). */
+ * session pass through (gate file keyed on PPID). Searches targeting paths
+ * outside the current working directory are never blocked. */
 static void cbm_install_hook_gate_script(const char *home) {
     if (!home) {
         return;
@@ -1655,18 +1658,46 @@ static void cbm_install_hook_gate_script(const char *home) {
     }
     (void)fprintf(f, "#!/bin/bash\n"
                      "# Gate hook: nudges Claude toward codebase-memory-mcp for code discovery.\n"
-                     "# First Grep/Glob/Read/Search per session -> block. Subsequent -> allow.\n"
+                     "#\n"
+                     "# Only blocks when ALL of these are true:\n"
+                     "#   1. First Grep/Search in this session (gate file doesn't exist yet)\n"
+                     "#   2. The search path is inside the current working directory\n"
+                     "#      (external repos, /tmp, home dir searches pass through)\n"
+                     "#\n"
                      "# PPID = Claude Code process PID, unique per session.\n"
+                     "\n"
                      "GATE=/tmp/cbm-code-discovery-gate-$PPID\n"
                      "find /tmp -name 'cbm-code-discovery-gate-*' -mtime +1 -delete 2>/dev/null\n"
+                     "\n"
+                     "# Already shown the reminder this session — allow everything\n"
                      "if [ -f \"$GATE\" ]; then\n"
                      "    exit 0\n"
                      "fi\n"
+                     "\n"
+                     "# Check if the search path is inside the current project.\n"
+                     "# The hook receives tool input as JSON on stdin. Extract the \"path\" field.\n"
+                     "# If no path or path is outside CWD, this isn't project code discovery — allow it.\n"
+                     "INPUT=$(cat)\n"
+                     "SEARCH_PATH=$(echo \"$INPUT\" | grep -oP '\"path\"\\s*:\\s*\"([^\"]*)\"' | head -1 | sed 's/.*\"\\([^\"]*\\)\"/\\1/')\n"
+                     "\n"
+                     "if [ -n \"$SEARCH_PATH\" ]; then\n"
+                     "    # Resolve to absolute path for comparison\n"
+                     "    ABS_SEARCH=$(realpath \"$SEARCH_PATH\" 2>/dev/null || echo \"$SEARCH_PATH\")\n"
+                     "    ABS_CWD=$(realpath \"$PWD\" 2>/dev/null || echo \"$PWD\")\n"
+                     "\n"
+                     "    # If searching outside the current project, allow it\n"
+                     "    case \"$ABS_SEARCH\" in\n"
+                     "        \"$ABS_CWD\"*) ;; # inside project — fall through to gate check\n"
+                     "        *) exit 0 ;;     # outside project — allow\n"
+                     "    esac\n"
+                     "fi\n"
+                     "\n"
+                     "# First in-project search this session — block with reminder\n"
                      "touch \"$GATE\"\n"
                      "echo 'BLOCKED: For code discovery, use codebase-memory-mcp tools first: "
                      "search_graph(name_pattern) to find functions/classes, trace_path() for "
                      "call chains, get_code_snippet(qualified_name) to read source. If the graph "
-                     "is not indexed yet, call index_repository first. Fall back to Grep/Glob/Read "
+                     "is not indexed yet, call index_repository first. Fall back to Grep "
                      "only for text content search. If you need Grep, retry.' >&2\n"
                      "exit 2\n");
     /* fchmod before close to avoid TOCTOU race (CodeQL cpp/toctou-race-condition) */

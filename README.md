@@ -264,7 +264,7 @@ Restart your agent. Verify with `/mcp` — you should see `codebase-memory-mcp` 
 
 | Agent | MCP Config | Instructions | Hooks |
 |-------|-----------|-------------|-------|
-| Claude Code | `.claude/.mcp.json` | 4 Skills | PreToolUse (Grep/Glob/Read reminder) |
+| Claude Code | `.claude/.mcp.json` | 4 Skills | PreToolUse (Grep/Search reminder) |
 | Codex CLI | `.codex/config.toml` | `.codex/AGENTS.md` | — |
 | Gemini CLI | `.gemini/settings.json` | `.gemini/GEMINI.md` | BeforeTool (grep/read reminder) |
 | Zed | `settings.json` (JSONC) | — | — |

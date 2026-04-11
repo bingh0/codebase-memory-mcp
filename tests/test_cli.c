@@ -1889,7 +1889,7 @@ TEST(cli_upsert_claude_hook_fresh) {
     const char *data = read_test_file(settingspath);
     ASSERT_NOT_NULL(data);
     ASSERT(strstr(data, "PreToolUse") != NULL);
-    ASSERT(strstr(data, "Grep|Glob|Read") != NULL);
+    ASSERT(strstr(data, "Grep|Search") != NULL);
     ASSERT(strstr(data, "cbm-code-discovery-gate") != NULL);
 
     test_rmdir_r(tmpdir);
@@ -1915,7 +1915,7 @@ TEST(cli_upsert_claude_hook_existing) {
     const char *data = read_test_file(settingspath);
     ASSERT_NOT_NULL(data);
     /* Our hook added */
-    ASSERT(strstr(data, "Grep|Glob|Read") != NULL);
+    ASSERT(strstr(data, "Grep|Search") != NULL);
     /* Existing hook preserved */
     ASSERT(strstr(data, "Bash") != NULL);
     ASSERT(strstr(data, "firewall") != NULL);
@@ -1944,6 +1944,35 @@ TEST(cli_upsert_claude_hook_replace) {
     ASSERT_NOT_NULL(data);
     /* Old message gone, new hook script path present */
     ASSERT(strstr(data, "old-cmm-message") == NULL);
+    ASSERT(strstr(data, "cbm-code-discovery-gate") != NULL);
+
+    test_rmdir_r(tmpdir);
+    PASS();
+}
+
+TEST(cli_upsert_claude_hook_upgrade_old_matcher) {
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/cli-hook-XXXXXX");
+    if (!cbm_mkdtemp(tmpdir))
+        SKIP("cbm_mkdtemp failed");
+
+    char settingspath[512];
+    snprintf(settingspath, sizeof(settingspath), "%s/settings.json", tmpdir);
+    /* Pre-existing CMM hook with previous-version matcher (Grep|Glob|Read|Search) */
+    write_test_file(settingspath,
+                    "{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Grep|Glob|Read|Search\","
+                    "\"hooks\":[{\"type\":\"command\",\"command\":\"echo old-gate\"}]}]}}");
+
+    int rc = cbm_upsert_claude_hooks(settingspath);
+    ASSERT_EQ(rc, 0);
+
+    const char *data = read_test_file(settingspath);
+    ASSERT_NOT_NULL(data);
+    /* Old matcher replaced with new narrower matcher */
+    ASSERT(strstr(data, "Grep|Glob|Read|Search") == NULL);
+    ASSERT(strstr(data, "Grep|Search") != NULL);
+    /* Old command replaced */
+    ASSERT(strstr(data, "old-gate") == NULL);
     ASSERT(strstr(data, "cbm-code-discovery-gate") != NULL);
 
     test_rmdir_r(tmpdir);
@@ -2455,6 +2484,7 @@ SUITE(cli) {
     RUN_TEST(cli_upsert_claude_hook_fresh);
     RUN_TEST(cli_upsert_claude_hook_existing);
     RUN_TEST(cli_upsert_claude_hook_replace);
+    RUN_TEST(cli_upsert_claude_hook_upgrade_old_matcher);
     RUN_TEST(cli_upsert_claude_hook_preserves_others);
     RUN_TEST(cli_remove_claude_hooks);
 
